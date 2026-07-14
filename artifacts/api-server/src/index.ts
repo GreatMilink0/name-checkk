@@ -1,5 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
+import { startBot } from "./bot/index";
 
 const rawPort = process.env["PORT"];
 
@@ -23,3 +24,11 @@ app.listen(port, (err) => {
 
   logger.info({ port }, "Server listening");
 });
+
+// Start Discord bot if token is present
+const botToken = process.env["DISCORD_BOT_TOKEN"];
+if (botToken) {
+  startBot(botToken);
+} else {
+  logger.warn("DISCORD_BOT_TOKEN not set — bot will not start");
+}
