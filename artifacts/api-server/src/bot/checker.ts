@@ -46,17 +46,21 @@ export async function checkUsername(username: string): Promise<CheckResult> {
 }
 
 /**
- * Checks a list of usernames with a small delay between requests
- * to stay inside Discord's rate limits.
+ * Checks a list of usernames in parallel batches to stay within
+ * Discord's rate limits while being much faster than sequential.
  */
 export async function checkUsernames(
   usernames: string[],
-  delayMs = 400,
+  { batchSize = 5, batchDelayMs = 500 } = {},
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
-  for (const username of usernames) {
-    results.push(await checkUsername(username));
-    await delay(delayMs);
+  for (let i = 0; i < usernames.length; i += batchSize) {
+    const batch = usernames.slice(i, i + batchSize);
+    const batchResults = await Promise.all(batch.map(checkUsername));
+    results.push(...batchResults);
+    if (i + batchSize < usernames.length) {
+      await delay(batchDelayMs);
+    }
   }
   return results;
 }
