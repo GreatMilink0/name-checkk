@@ -67,24 +67,39 @@ export async function checkUsername(username: string, retries = 1): Promise<Chec
   }
 }
 
+export type CheckSummary = {
+  results: CheckResult[];
+  /** true when the deadline was hit before all names were checked */
+  partial: boolean;
+  checkedCount: number;
+  totalCount: number;
+};
+
 /**
  * Checks a list of usernames in parallel batches to stay within
  * Discord's rate limits while being much faster than sequential.
+ * If deadlineMs is set, stops after that many ms and returns partial results.
  */
 export async function checkUsernames(
   usernames: string[],
-  { batchSize = 2, batchDelayMs = 2000 } = {},
-): Promise<CheckResult[]> {
+  { batchSize = 2, batchDelayMs = 2000, deadlineMs }: { batchSize?: number; batchDelayMs?: number; deadlineMs?: number } = {},
+): Promise<CheckSummary> {
   const results: CheckResult[] = [];
+  const deadline = deadlineMs ? Date.now() + deadlineMs : null;
+
   for (let i = 0; i < usernames.length; i += batchSize) {
+    if (deadline && Date.now() >= deadline) {
+      return { results, partial: true, checkedCount: results.length, totalCount: usernames.length };
+    }
     const batch = usernames.slice(i, i + batchSize);
     const batchResults = await Promise.all(batch.map(checkUsername));
     results.push(...batchResults);
     if (i + batchSize < usernames.length) {
+      if (deadline && Date.now() >= deadline) break;
       await delay(batchDelayMs);
     }
   }
-  return results;
+  return { results, partial: results.length < usernames.length, checkedCount: results.length, totalCount: usernames.length };
 }
 
 /**

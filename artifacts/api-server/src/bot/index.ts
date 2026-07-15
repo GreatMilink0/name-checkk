@@ -123,7 +123,7 @@ export function startBot(token: string): void {
       `🔍 Checking **${usernames.length}** username${usernames.length === 1 ? "" : "s"}… this may take a moment.`,
     );
 
-    const results = await checkUsernames(usernames);
+    const { results, partial, checkedCount, totalCount } = await checkUsernames(usernames, { deadlineMs: 28000 });
     const available = results
       .filter((r) => r.available)
       .map((r) => r.username);
@@ -132,16 +132,20 @@ export function startBot(token: string): void {
       .map((r) => r.username);
     const errors = results.filter((r) => r.error).map((r) => r.username);
 
+    const partialNote = partial
+      ? `\n⏱️ *Checked ${checkedCount}/${totalCount} names in 30 s — run again with the remaining names for the rest.*`
+      : "";
+
     // If available list is large, send as a file attachment instead
     if (available.length > MAX_INLINE) {
       const fileContent = available.join("\n");
       const file = new AttachmentBuilder(Buffer.from(fileContent, "utf-8"), {
         name: "available-usernames.txt",
       });
-      const summary = `✅ **${available.length}** available / 🔴 **${taken.length}** taken / ⚠️ **${errors.length}** errors\nAvailable usernames attached as a file.`;
+      const summary = `✅ **${available.length}** available / 🔴 **${taken.length}** taken / ⚠️ **${errors.length}** errors\nAvailable usernames attached as a file.${partialNote}`;
       await cmd.editReply({ content: summary, files: [file] });
     } else {
-      const message = formatResults(available, taken, errors);
+      const message = formatResults(available, taken, errors) + partialNote;
       // Discord messages cap at 2000 chars; truncate gracefully
       const safe =
         message.length > 1900 ? message.slice(0, 1900) + "\n…(truncated)" : message;
