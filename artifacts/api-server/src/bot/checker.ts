@@ -40,7 +40,11 @@ export async function checkUsername(username: string, retries = 1): Promise<Chec
 
     if (res.status === 429) {
       const retryAfter = Number(res.headers.get("retry-after") ?? 3);
-      logger.warn({ username, retryAfter }, "Rate limited, retrying");
+      logger.warn({ username, retryAfter }, "Rate limited");
+      // If the wait is too long to survive Discord's 15-min interaction window, bail out fast
+      if (retryAfter > 10) {
+        return { username, available: false, error: "rate-limited" };
+      }
       await delay(retryAfter * 1000);
       if (retries > 0) return checkUsername(username, retries - 1);
       return { username, available: false, error: "rate-limited" };
@@ -69,7 +73,7 @@ export async function checkUsername(username: string, retries = 1): Promise<Chec
  */
 export async function checkUsernames(
   usernames: string[],
-  { batchSize = 5, batchDelayMs = 500 } = {},
+  { batchSize = 2, batchDelayMs = 2000 } = {},
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
   for (let i = 0; i < usernames.length; i += batchSize) {
