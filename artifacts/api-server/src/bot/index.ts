@@ -4,9 +4,37 @@ import {
   Events,
   ChatInputCommandInteraction,
   AttachmentBuilder,
+  REST,
+  Routes,
+  SlashCommandBuilder,
 } from "discord.js";
 import { logger } from "../lib/logger";
 import { checkUsernames, parseUsernames } from "./checker";
+
+async function registerCommands(token: string, clientId: string) {
+  const commands = [
+    new SlashCommandBuilder()
+      .setName("check")
+      .setDescription("Check which Discord usernames from a list are available")
+      .addStringOption((opt) =>
+        opt
+          .setName("usernames")
+          .setDescription("Comma or newline separated usernames to check")
+          .setRequired(false),
+      )
+      .addAttachmentOption((opt) =>
+        opt
+          .setName("file")
+          .setDescription("A .txt file with one username per line")
+          .setRequired(false),
+      )
+      .toJSON(),
+  ];
+
+  const rest = new REST({ version: "10" }).setToken(token);
+  await rest.put(Routes.applicationCommands(clientId), { body: commands });
+  logger.info("Slash commands registered");
+}
 
 const MAX_INLINE = 50; // show results inline below this count; use file above
 
@@ -38,10 +66,20 @@ function formatResults(
 }
 
 export function startBot(token: string): void {
+  const clientId = process.env["DISCORD_CLIENT_ID"];
   const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-  client.once(Events.ClientReady, (c) => {
+  client.once(Events.ClientReady, async (c) => {
     logger.info({ tag: c.user.tag }, "Discord bot ready");
+    if (clientId) {
+      try {
+        await registerCommands(token, clientId);
+      } catch (err) {
+        logger.error({ err }, "Failed to register slash commands");
+      }
+    } else {
+      logger.warn("DISCORD_CLIENT_ID not set — skipping command registration");
+    }
   });
 
   client.on(Events.InteractionCreate, async (interaction) => {
