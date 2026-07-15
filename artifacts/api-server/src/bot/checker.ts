@@ -15,7 +15,7 @@ export type CheckResult = {
  * Checks a single Discord username for availability.
  * Returns true when the username is NOT taken.
  */
-export async function checkUsername(username: string, retries = 1): Promise<CheckResult> {
+export async function checkUsername(username: string, retries = 4): Promise<CheckResult> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8000);
 
@@ -39,13 +39,11 @@ export async function checkUsername(username: string, retries = 1): Promise<Chec
     clearTimeout(timer);
 
     if (res.status === 429) {
-      const retryAfter = Number(res.headers.get("retry-after") ?? 3);
-      logger.warn({ username, retryAfter }, "Rate limited");
-      // If the wait is too long to survive Discord's 15-min interaction window, bail out fast
-      if (retryAfter > 10) {
-        return { username, available: false, error: "rate-limited" };
-      }
-      await delay(retryAfter * 1000);
+      const retryAfter = Number(res.headers.get("retry-after") ?? 2);
+      logger.warn({ username, retryAfter, retries }, "Rate limited");
+      if (retryAfter > 10) return { username, available: false, error: "rate-limited" };
+      // Wait the full retry-after plus a 1s buffer, then retry
+      await delay(retryAfter * 1000 + 1000);
       if (retries > 0) return checkUsername(username, retries - 1);
       return { username, available: false, error: "rate-limited" };
     }
@@ -82,7 +80,7 @@ export type CheckSummary = {
  */
 export async function checkUsernames(
   usernames: string[],
-  { batchSize = 2, batchDelayMs = 2000, deadlineMs }: { batchSize?: number; batchDelayMs?: number; deadlineMs?: number } = {},
+  { batchSize = 1, batchDelayMs = 3000, deadlineMs }: { batchSize?: number; batchDelayMs?: number; deadlineMs?: number } = {},
 ): Promise<CheckSummary> {
   const results: CheckResult[] = [];
   const deadline = deadlineMs ? Date.now() + deadlineMs : null;
