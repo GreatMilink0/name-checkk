@@ -120,36 +120,54 @@ export function startBot(token: string): void {
     }
 
     await cmd.editReply(
-      `🔍 Checking **${usernames.length}** username${usernames.length === 1 ? "" : "s"}… this may take a moment.`,
+      `🔍 Checking **${usernames.length}** username${usernames.length === 1 ? "" : "s"}…`,
     );
 
-    const { results, partial, checkedCount, totalCount } = await checkUsernames(usernames, { deadlineMs: 28000 });
-    const available = results
-      .filter((r) => r.available)
-      .map((r) => r.username);
-    const taken = results
-      .filter((r) => !r.available && !r.error)
-      .map((r) => r.username);
-    const errors = results.filter((r) => r.error).map((r) => r.username);
+    // Discord interaction tokens expire after 15 min; leave a buffer
+    const INTERACTION_DEADLINE = Date.now() + 14 * 60 * 1000;
+    const BATCH_DEADLINE_MS = 28000;
 
-    const partialNote = partial
-      ? `\n⏱️ *Checked ${checkedCount}/${totalCount} names in 30 s — run again with the remaining names for the rest.*`
-      : "";
+    let remaining = usernames;
+    let batchNum = 0;
 
-    // If available list is large, send as a file attachment instead
-    if (available.length > MAX_INLINE) {
-      const fileContent = available.join("\n");
-      const file = new AttachmentBuilder(Buffer.from(fileContent, "utf-8"), {
-        name: "available-usernames.txt",
-      });
-      const summary = `✅ **${available.length}** available / 🔴 **${taken.length}** taken / ⚠️ **${errors.length}** errors\nAvailable usernames attached as a file.${partialNote}`;
-      await cmd.editReply({ content: summary, files: [file] });
-    } else {
-      const message = formatResults(available, taken, errors) + partialNote;
-      // Discord messages cap at 2000 chars; truncate gracefully
-      const safe =
-        message.length > 1900 ? message.slice(0, 1900) + "\n…(truncated)" : message;
-      await cmd.editReply(safe);
+    while (remaining.length > 0 && Date.now() < INTERACTION_DEADLINE) {
+      const { results, checkedCount } = await checkUsernames(remaining, { deadlineMs: BATCH_DEADLINE_MS });
+      remaining = remaining.slice(checkedCount);
+
+      const available = results.filter((r) => r.available).map((r) => r.username);
+      const taken = results.filter((r) => !r.available && !r.error).map((r) => r.username);
+      const errors = results.filter((r) => r.error).map((r) => r.username);
+
+      const progress = remaining.length > 0
+        ? `\n⏳ *${remaining.length} names still to go — sending next batch now…*`
+        : "";
+
+      const body = formatResults(available, taken, errors) + progress;
+      const safe = body.length > 1900 ? body.slice(0, 1900) + "\n…(truncated)" : body;
+
+      if (batchNum === 0) {
+        if (available.length > MAX_INLINE) {
+          const file = new AttachmentBuilder(Buffer.from(available.join("\n"), "utf-8"), { name: "available-usernames.txt" });
+          const summary = `✅ **${available.length}** available / 🔴 **${taken.length}** taken / ⚠️ **${errors.length}** errors\nAvailable names in file.${progress}`;
+          await cmd.editReply({ content: summary, files: [file] });
+        } else {
+          await cmd.editReply(safe);
+        }
+      } else {
+        if (available.length > MAX_INLINE) {
+          const file = new AttachmentBuilder(Buffer.from(available.join("\n"), "utf-8"), { name: `available-usernames-part${batchNum + 1}.txt` });
+          const summary = `✅ **${available.length}** available / 🔴 **${taken.length}** taken / ⚠️ **${errors.length}** errors\nAvailable names in file.${progress}`;
+          await cmd.followUp({ content: summary, files: [file] });
+        } else {
+          await cmd.followUp(safe);
+        }
+      }
+
+      batchNum++;
+    }
+
+    if (remaining.length > 0) {
+      await cmd.followUp(`⚠️ Ran out of time (15 min limit). **${remaining.length}** names were not checked: ${remaining.join(", ")}`);
     }
   });
 
