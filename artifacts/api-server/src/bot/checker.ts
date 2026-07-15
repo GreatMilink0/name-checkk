@@ -15,23 +15,35 @@ export type CheckResult = {
  * Checks a single Discord username for availability.
  * Returns true when the username is NOT taken.
  */
-export async function checkUsername(username: string): Promise<CheckResult> {
+export async function checkUsername(username: string, retries = 1): Promise<CheckResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8000);
+
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    const token = process.env["DISCORD_BOT_TOKEN"];
+    if (token) headers["Authorization"] = `Bot ${token}`;
+
     const res = await fetch(
       `${DISCORD_API}/unique-username/username-attempt-unauthed`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ username }),
+        signal: controller.signal,
       },
     );
 
+    clearTimeout(timer);
+
     if (res.status === 429) {
-      // Rate limited — back off and retry once
-      const retryAfter = Number(res.headers.get("retry-after") ?? 2);
+      const retryAfter = Number(res.headers.get("retry-after") ?? 3);
       logger.warn({ username, retryAfter }, "Rate limited, retrying");
       await delay(retryAfter * 1000);
-      return checkUsername(username);
+      if (retries > 0) return checkUsername(username, retries - 1);
+      return { username, available: false, error: "rate-limited" };
     }
 
     if (!res.ok) {
@@ -41,7 +53,13 @@ export async function checkUsername(username: string): Promise<CheckResult> {
     const data = (await res.json()) as { taken?: boolean };
     return { username, available: !data.taken };
   } catch (err) {
-    return { username, available: false, error: String(err) };
+    clearTimeout(timer);
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("abort") && retries > 0) {
+      await delay(1000);
+      return checkUsername(username, retries - 1);
+    }
+    return { username, available: false, error: msg };
   }
 }
 
